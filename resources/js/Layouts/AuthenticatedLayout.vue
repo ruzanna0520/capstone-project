@@ -45,6 +45,16 @@ const dashboardRouteName = computed(() => {
                                     Главная
                                 </NavLink>
 
+                                <NavLink
+                                    :href="route(dashboardRouteName)"
+                                    :active="
+                                        route().current('admin.dashboard') ||
+                                        route().current('user.dashboard')
+                                    "
+                                >
+                                    Каталог
+                                </NavLink>
+
                                 <!--
                                 <NavLink
                                     v-if="isAdmin"
