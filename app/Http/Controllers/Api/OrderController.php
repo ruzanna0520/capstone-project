@@ -84,16 +84,18 @@ class OrderController extends Controller
     public function show(Order $order): JsonResponse
     {
         $user = Auth::user();
+
         if (!$user || ($order->user_id !== $user->id && !$user->is_admin)) {
             return response()->json(['message' => 'Forbidden'], 403);
         }
+
         $order->load([
-            'user:id,name,email',
+            'user',
             'products' => function ($query) {
-                $query->select('products.id', 'products.name', 'products.image_url')
-                    ->withPivot('quantity', 'price_at_time_of_order');
+                $query->withPivot('quantity', 'price_at_time_of_order');
             }
         ]);
+
         return response()->json($order);
     }
 

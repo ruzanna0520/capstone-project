@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\OrderController;
+use App\Http\Controllers\Api\UserController;
 
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\AdminDashboardController;
@@ -27,6 +28,14 @@ Route::middleware(['auth'])->prefix('internal-api')->name('api.')->group(functio
     Route::get('orders/{order}', [OrderController::class, 'show'])->name('orders.show');
     Route::put('orders/{order}', [OrderController::class, 'update'])->name('orders.update');
     Route::delete('orders/{order}', [OrderController::class, 'destroy'])->name('orders.destroy');
+
+    Route::get('users', [UserController::class, 'index'])->name('users.index');
+    Route::post('users', [UserController::class, 'store'])->name('users.store');
+    Route::get('users/{user}', [UserController::class, 'show'])->name('users.show');
+    Route::put('users/{user}', [UserController::class, 'update'])->name('users.update');
+    Route::delete('users/{user}', [UserController::class, 'destroy'])->name('users.destroy');
+
+    Route::get('customers', [UserController::class, 'indexCustomers'])->name('customers.index');
 
 });
 
