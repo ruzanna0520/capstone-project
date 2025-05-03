@@ -21,26 +21,20 @@ const dashboardRouteName = computed(() => {
     <div>
         <div class="min-h-screen bg-gray-100">
             <nav class="border-b border-gray-100 bg-white">
-                <!-- Primary Navigation Menu -->
                 <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
                     <div class="flex h-16 justify-between">
                         <div class="flex">
-                            <!-- Logo -->
                             <div class="flex shrink-0 items-center">
-                                <!-- --- ИЗМЕНЕНО --- -->
                                 <Link :href="route(dashboardRouteName)">
                                     <ApplicationLogo
                                         class="block h-9 w-auto fill-current text-gray-800"
                                     />
                                 </Link>
-                                <!-- --- КОНЕЦ ИЗМЕНЕНИЙ --- -->
                             </div>
 
-                            <!-- Navigation Links -->
                             <div
                                 class="hidden space-x-8 sm:-my-px sm:ms-10 sm:flex"
                             >
-                                <!-- --- ИЗМЕНЕНО --- -->
                                 <NavLink
                                     :href="route(dashboardRouteName)"
                                     :active="
@@ -48,25 +42,22 @@ const dashboardRouteName = computed(() => {
                                         route().current('user.dashboard')
                                     "
                                 >
-                                    Dashboard
+                                    Главная
                                 </NavLink>
-                                <!-- --- КОНЕЦ ИЗМЕНЕНИЙ --- -->
 
-                                <!-- Можно добавить специфичные для админа ссылки -->
                                 <!--
                                 <NavLink
                                     v-if="isAdmin"
                                     :href="route('some.admin.route')"
                                     :active="route().current('some.admin.route')"
                                 >
-                                    Admin Section
+                                    Раздел админа
                                 </NavLink>
                                 -->
                             </div>
                         </div>
 
                         <div class="hidden sm:ms-6 sm:flex sm:items-center">
-                            <!-- Settings Dropdown -->
                             <div class="relative ms-3">
                                 <Dropdown align="right" width="48">
                                     <template #trigger>
@@ -75,7 +66,6 @@ const dashboardRouteName = computed(() => {
                                                 type="button"
                                                 class="inline-flex items-center rounded-md border border-transparent bg-white px-3 py-2 text-sm font-medium leading-4 text-gray-500 transition duration-150 ease-in-out hover:text-gray-700 focus:outline-none"
                                             >
-                                                <!-- Проверка на случай, если user еще не загрузился -->
                                                 {{
                                                     $page.props.auth.user?.name
                                                 }}
@@ -100,21 +90,20 @@ const dashboardRouteName = computed(() => {
                                         <DropdownLink
                                             :href="route('profile.edit')"
                                         >
-                                            Profile
+                                            Профиль
                                         </DropdownLink>
                                         <DropdownLink
                                             :href="route('logout')"
                                             method="post"
                                             as="button"
                                         >
-                                            Log Out
+                                            Выйти
                                         </DropdownLink>
                                     </template>
                                 </Dropdown>
                             </div>
                         </div>
 
-                        <!-- Hamburger -->
                         <div class="-me-2 flex items-center sm:hidden">
                             <button
                                 @click="
@@ -157,7 +146,6 @@ const dashboardRouteName = computed(() => {
                     </div>
                 </div>
 
-                <!-- Responsive Navigation Menu -->
                 <div
                     :class="{
                         block: showingNavigationDropdown,
@@ -173,11 +161,10 @@ const dashboardRouteName = computed(() => {
                                 route().current('user.dashboard')
                             "
                         >
-                            Dashboard
+                            Главная
                         </ResponsiveNavLink>
                     </div>
 
-                    <!-- Responsive Settings Options -->
                     <div
                         class="border-t border-gray-200 pb-1 pt-4"
                         v-if="$page.props.auth.user"
@@ -194,28 +181,26 @@ const dashboardRouteName = computed(() => {
 
                         <div class="mt-3 space-y-1">
                             <ResponsiveNavLink :href="route('profile.edit')">
-                                Profile
+                                Профиль
                             </ResponsiveNavLink>
                             <ResponsiveNavLink
                                 :href="route('logout')"
                                 method="post"
                                 as="button"
                             >
-                                Log Out
+                                Выйти
                             </ResponsiveNavLink>
                         </div>
                     </div>
                 </div>
             </nav>
 
-            <!-- Page Heading -->
             <header class="bg-white shadow" v-if="$slots.header">
                 <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
                     <slot name="header" />
                 </div>
             </header>
 
-            <!-- Page Content -->
             <main>
                 <slot />
             </main>

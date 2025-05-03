@@ -1,20 +1,13 @@
 <?php
 
 use App\Http\Controllers\ProfileController;
-use App\Http\Controllers\AdminDashboardController; // <-- Импорт
-use App\Http\Controllers\UserDashboardController;  // <-- Импорт
-use Illuminate\Foundation\Application;
+use App\Http\Controllers\AdminDashboardController;
+use App\Http\Controllers\UserDashboardController;
 use Illuminate\Support\Facades\Route;
-use Inertia\Inertia;
-use Illuminate\Http\Request; // <-- Импорт Request
+use Illuminate\Http\Request;
 
 Route::get('/', function () {
-    return Inertia::render('Welcome', [
-        'canLogin' => Route::has('login'),
-        'canRegister' => Route::has('register'),
-        'laravelVersion' => Application::VERSION,
-        'phpVersion' => PHP_VERSION,
-    ]);
+    return redirect()->route('login');
 });
 
 Route::get('/dashboard', function (Request $request) {
@@ -31,8 +24,6 @@ Route::get('/admin-dashboard', AdminDashboardController::class)
 Route::get('/user-dashboard', UserDashboardController::class)
     ->middleware(['auth', 'verified'])
     ->name('user.dashboard');
-
-
 
 Route::middleware('auth')->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
