@@ -46,6 +46,7 @@ const dashboardRouteName = computed(() => {
                                 </NavLink>
 
                                 <NavLink
+                                    v-if="!isAdmin"
                                     :href="route(dashboardRouteName)"
                                     :active="
                                         route().current('admin.dashboard') ||
