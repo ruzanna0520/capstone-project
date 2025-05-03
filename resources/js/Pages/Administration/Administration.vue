@@ -5,8 +5,6 @@ import { computed, ref } from 'vue';
 import Categories from '@/Pages/Administration/Categories.vue';
 import Products from '@/Pages/Administration/Products.vue';
 import Orders from '@/Pages/Administration/Orders.vue';
-import Users from '@/Pages/Administration/Users.vue';
-import Customers from '@/Pages/Administration/Customers.vue';
 
 const tabs = [
     {
@@ -23,16 +21,6 @@ const tabs = [
         id: 3,
         title: 'Заказы',
         content: Orders,
-    },
-    {
-        id: 4,
-        title: 'Покупатели',
-        content: Customers,
-    },
-    {
-        id: 5,
-        title: 'Пользователи',
-        content: Users,
     },
 ];
 
@@ -61,7 +49,7 @@ const selectedComponent = computed(
                                     <button
                                         @click="currentTab = tab.id"
                                         :class="{
-                                            'bg-primary text-indigo-700':
+                                            'bg-primary text-white':
                                                 currentTab === tab.id,
                                         }"
                                     >

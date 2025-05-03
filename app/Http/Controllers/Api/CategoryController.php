@@ -13,7 +13,7 @@ class CategoryController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $categories = Category::latest()->paginate($request->query('per_page', 15));
+        $categories = Category::latest()->get();
         return response()->json($categories);
     }
 
