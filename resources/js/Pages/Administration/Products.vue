@@ -2,11 +2,10 @@
 import { ref, onMounted, computed } from 'vue';
 import axios from 'axios';
 
-// --- State ---
-const products = ref([]);
-const categories = ref([]); // Для выпадающего списка
-const isLoading = ref(false);
-const error = ref(null);
+const productsData = ref({ data: [], links: [] });
+const categories = ref([]);
+const isLoadingProducts = ref(false);
+const listError = ref(null);
 
 const showAddModal = ref(false);
 const newProduct = ref({
@@ -14,7 +13,7 @@ const newProduct = ref({
     description: '',
     price: '',
     category_id: null,
-    image: null, // Для хранения файла
+    image: null,
 });
 const addProductImagePreview = ref(null);
 const addError = ref(null);
@@ -27,82 +26,72 @@ const editingProduct = ref({
     description: '',
     price: '',
     category_id: null,
-    image_url: null, // Текущий URL картинки
-    image: null, // Для нового файла при редактировании
+    image_url: null,
+    image: null,
 });
 const editProductImagePreview = ref(null);
 const editError = ref(null);
 const isUpdating = ref(false);
 const isDeleting = ref(false);
 
-const addFileInputRef = ref(null); // Ref для input type=file в модалке добавления
-const editFileInputRef = ref(null); // Ref для input type=file в модалке редактирования
+const addFileInputRef = ref(null);
+const editFileInputRef = ref(null);
 
-// --- API Base URLs ---
 const API_PRODUCTS_URL = '/internal-api/products';
 const API_CATEGORIES_URL = '/internal-api/categories';
 
-// --- Computed ---
 const sortedCategories = computed(() => {
-    // Клонируем массив, чтобы не мутировать оригинал, и сортируем по имени
     return [...categories.value].sort((a, b) => a.name.localeCompare(b.name));
 });
 
-// --- Helper ---
 const getImageUrl = (path) => {
-    // Возвращает полный URL, если есть путь, иначе null
     return path ? `/storage/${path}` : null;
 };
 
-// --- API Functions ---
-const fetchProducts = async () => {
-    isLoading.value = true;
-    error.value = null;
+const fetchProducts = async (url = API_PRODUCTS_URL) => {
+    isLoadingProducts.value = true;
+    listError.value = null;
     try {
-        const response = await axios.get(API_PRODUCTS_URL);
-        // Данные могут быть в response.data или response.data.data, если есть пагинация
-        products.value = response.data.data
-            ? response.data.data
-            : response.data;
+        const response = await axios.get(url);
+        productsData.value = response.data;
     } catch (err) {
         console.error('Ошибка загрузки товаров:', err);
-        error.value =
+        listError.value =
             err.response?.data?.message || 'Не удалось загрузить товары.';
+        productsData.value = { data: [], links: [] };
     } finally {
-        isLoading.value = false;
+        isLoadingProducts.value = false;
     }
 };
 
 const fetchCategories = async () => {
-    // Не устанавливаем isLoading здесь, чтобы не мешать загрузке товаров
     try {
         const response = await axios.get(API_CATEGORIES_URL);
         categories.value = response.data;
     } catch (err) {
         console.error('Ошибка загрузки категорий:', err);
-        // Можно установить отдельную ошибку для категорий, если нужно
-        error.value = error.value || 'Не удалось загрузить категории.';
+        listError.value = listError.value || 'Не удалось загрузить категории.';
     }
 };
 
-const handleFileChange = (event, target) => {
+const handleFileChange = (event, targetRef) => {
     const file = event.target.files[0];
     if (!file) {
-        target.value = null;
-        if (target === newProduct.value.image)
-            addProductImagePreview.value = null;
-        if (target === editingProduct.value.image)
-            editProductImagePreview.value = null;
+        targetRef.value.image = null;
+        if (targetRef === newProduct) addProductImagePreview.value = null;
+        if (targetRef === editingProduct)
+            editProductImagePreview.value = getImageUrl(
+                editingProduct.value.image_url,
+            );
         return;
     }
-    target.image = file; // Сохраняем файл в нужном ref
+    targetRef.value.image = file;
 
-    // Создаем превью
     const reader = new FileReader();
     reader.onload = (e) => {
-        if (target === newProduct.value)
+        if (targetRef === newProduct)
             addProductImagePreview.value = e.target.result;
-        if (target === editingProduct.value)
+        if (targetRef === editingProduct)
             editProductImagePreview.value = e.target.result;
     };
     reader.readAsDataURL(file);
@@ -114,7 +103,7 @@ const addProduct = async () => {
 
     const formData = new FormData();
     formData.append('name', newProduct.value.name);
-    formData.append('description', newProduct.value.description || ''); // Пустая строка если null
+    formData.append('description', newProduct.value.description || '');
     formData.append('price', newProduct.value.price);
     formData.append('category_id', newProduct.value.category_id);
     if (newProduct.value.image) {
@@ -153,10 +142,9 @@ const updateProduct = async () => {
     if (editingProduct.value.image) {
         formData.append('image', editingProduct.value.image);
     }
-    formData.append('_method', 'PUT'); // Используем POST с _method=PUT для FormData
+    formData.append('_method', 'PUT');
 
     try {
-        // Отправляем POST с _method=PUT
         await axios.post(
             `${API_PRODUCTS_URL}/${editingProduct.value.id}`,
             formData,
@@ -165,7 +153,10 @@ const updateProduct = async () => {
             },
         );
         closeEditModal();
-        await fetchProducts();
+        await fetchProducts(
+            productsData.value.links?.find((l) => l.active)?.url ||
+                API_PRODUCTS_URL,
+        );
     } catch (err) {
         console.error('Ошибка обновления товара:', err);
         editError.value =
@@ -195,7 +186,10 @@ const deleteProduct = async () => {
     try {
         await axios.delete(`${API_PRODUCTS_URL}/${editingProduct.value.id}`);
         closeEditModal();
-        await fetchProducts();
+        await fetchProducts(
+            productsData.value.links?.find((l) => l.active)?.url ||
+                API_PRODUCTS_URL,
+        );
     } catch (err) {
         console.error('Ошибка удаления товара:', err);
         editError.value =
@@ -205,7 +199,6 @@ const deleteProduct = async () => {
     }
 };
 
-// --- Modal Control ---
 const openAddModal = () => {
     newProduct.value = {
         name: '',
@@ -216,7 +209,7 @@ const openAddModal = () => {
     };
     addProductImagePreview.value = null;
     addError.value = null;
-    if (addFileInputRef.value) addFileInputRef.value.value = ''; // Сброс input file
+    if (addFileInputRef.value) addFileInputRef.value.value = '';
     showAddModal.value = true;
 };
 
@@ -231,12 +224,12 @@ const openEditModal = (product) => {
         description: product.description,
         price: product.price,
         category_id: product.category_id,
-        image_url: product.image_url, // Сохраняем текущий URL
-        image: null, // Сбрасываем поле нового файла
+        image_url: product.image_url,
+        image: null,
     };
-    editProductImagePreview.value = getImageUrl(product.image_url); // Показываем текущее или null
+    editProductImagePreview.value = getImageUrl(product.image_url);
     editError.value = null;
-    if (editFileInputRef.value) editFileInputRef.value.value = ''; // Сброс input file
+    if (editFileInputRef.value) editFileInputRef.value.value = '';
     showEditModal.value = true;
 };
 
@@ -244,9 +237,8 @@ const closeEditModal = () => {
     showEditModal.value = false;
 };
 
-// --- Lifecycle ---
 onMounted(async () => {
-    await fetchCategories(); // Сначала загружаем категории для селектора
+    await fetchCategories();
     await fetchProducts();
 });
 </script>
@@ -266,21 +258,21 @@ onMounted(async () => {
             </button>
         </div>
 
-        <div v-if="isLoading" class="py-10 text-center">
+        <div v-if="isLoadingProducts" class="py-10 text-center">
             <p class="text-gray-500">Загрузка...</p>
         </div>
 
         <div
-            v-if="error"
+            v-if="listError"
             class="relative mb-4 rounded border border-red-400 bg-red-100 px-4 py-3 text-red-700"
             role="alert"
         >
             <strong class="font-bold">Ошибка!</strong>
-            <span class="block sm:inline"> {{ error }}</span>
+            <span class="block sm:inline"> {{ listError }}</span>
         </div>
 
         <div
-            v-if="!isLoading && !error"
+            v-if="!isLoadingProducts && !listError"
             class="overflow-hidden rounded-lg bg-white shadow-md"
         >
             <table class="min-w-full divide-y divide-gray-200">
@@ -325,7 +317,7 @@ onMounted(async () => {
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-200 bg-white">
-                    <tr v-if="products.length === 0">
+                    <tr v-if="productsData.data.length === 0">
                         <td
                             colspan="6"
                             class="whitespace-nowrap px-6 py-4 text-center text-sm text-gray-500"
@@ -334,7 +326,7 @@ onMounted(async () => {
                         </td>
                     </tr>
                     <tr
-                        v-for="product in products"
+                        v-for="product in productsData.data"
                         :key="product.id"
                         @click="openEditModal(product)"
                         class="cursor-pointer transition duration-150 ease-in-out hover:bg-gray-100"
@@ -377,18 +369,43 @@ onMounted(async () => {
                             class="whitespace-nowrap px-6 py-4 text-sm text-gray-500"
                         >
                             {{
-                                new Date(
-                                    product.created_at,
-                                ).toLocaleDateString()
+                                new Date(product.created_at).toLocaleDateString(
+                                    'ru-RU',
+                                )
                             }}
                         </td>
                     </tr>
                 </tbody>
             </table>
-            <!-- Здесь можно добавить пагинацию, если API её возвращает -->
+            <div
+                class="border-t border-gray-200 bg-white px-4 py-3"
+                v-if="productsData.links && productsData.links.length > 3"
+            >
+                <div class="-mb-1 flex flex-wrap items-center justify-center">
+                    <template
+                        v-for="(link, key) in productsData.links"
+                        :key="key"
+                    >
+                        <div
+                            v-if="link.url === null"
+                            class="mb-1 mr-1 cursor-default rounded border px-3 py-1.5 text-sm text-gray-400"
+                            v-html="link.label"
+                        />
+                        <button
+                            v-else
+                            @click="fetchProducts(link.url)"
+                            class="mb-1 mr-1 rounded border px-3 py-1.5 text-sm hover:bg-gray-100 focus:border-indigo-500 focus:text-indigo-500"
+                            :class="{
+                                'border-indigo-300 bg-white font-semibold text-indigo-600':
+                                    link.active,
+                            }"
+                            v-html="link.label"
+                        ></button>
+                    </template>
+                </div>
+            </div>
         </div>
 
-        <!-- Модальное окно добавления товара -->
         <div
             v-if="showAddModal"
             class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black bg-opacity-50 p-4"
@@ -437,9 +454,12 @@ onMounted(async () => {
                             <option
                                 v-if="categories.length === 0"
                                 disabled
-                                value="null"
+                                :value="null"
                             >
                                 Сначала добавьте категории
+                            </option>
+                            <option :value="null" disabled>
+                                -- Выберите категорию --
                             </option>
                             <option
                                 v-for="cat in sortedCategories"
@@ -490,7 +510,7 @@ onMounted(async () => {
                             id="new-prod-image"
                             ref="addFileInputRef"
                             @change="handleFileChange($event, newProduct)"
-                            accept="image/png, image/jpeg, image/gif"
+                            accept="image/png, image/jpeg, image/gif, image/webp"
                             class="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:rounded-full file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-blue-700 hover:file:bg-blue-100"
                         />
                         <img
@@ -522,7 +542,6 @@ onMounted(async () => {
             </div>
         </div>
 
-        <!-- Модальное окно редактирования/удаления товара -->
         <div
             v-if="showEditModal"
             class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black bg-opacity-50 p-4"
@@ -568,6 +587,9 @@ onMounted(async () => {
                             required
                             class="mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm"
                         >
+                            <option :value="null" disabled>
+                                -- Выберите категорию --
+                            </option>
                             <option
                                 v-for="cat in sortedCategories"
                                 :key="cat.id"
@@ -612,34 +634,28 @@ onMounted(async () => {
                             class="block text-sm font-medium text-gray-700"
                             >Заменить изображение (необязательно)</label
                         >
-                        <div
-                            v-if="
-                                editProductImagePreview && !editingProduct.image
-                            "
-                            class="mt-2"
-                        >
-                            <p class="mb-1 text-xs text-gray-500">Текущее:</p>
+                        <div v-if="editProductImagePreview" class="mt-2">
+                            <p
+                                v-if="editingProduct.image"
+                                class="mb-1 text-xs text-gray-500"
+                            >
+                                Новое превью:
+                            </p>
+                            <p v-else class="mb-1 text-xs text-gray-500">
+                                Текущее:
+                            </p>
                             <img
                                 :src="editProductImagePreview"
-                                alt="Текущее фото"
+                                alt="Превью фото"
                                 class="h-20 w-20 rounded object-cover"
                             />
                         </div>
-                        <!-- Показываем превью нового файла, если он выбран -->
-                        <img
-                            v-if="
-                                editingProduct.image && editProductImagePreview
-                            "
-                            :src="editProductImagePreview"
-                            alt="Превью нового"
-                            class="mt-2 h-20 w-20 rounded object-cover"
-                        />
                         <input
                             type="file"
                             id="edit-prod-image"
                             ref="editFileInputRef"
                             @change="handleFileChange($event, editingProduct)"
-                            accept="image/png, image/jpeg, image/gif"
+                            accept="image/png, image/jpeg, image/gif, image/webp"
                             class="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:rounded-full file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-blue-700 hover:file:bg-blue-100"
                         />
                     </div>

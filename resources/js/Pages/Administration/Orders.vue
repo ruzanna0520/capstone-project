@@ -1,18 +1,21 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, computed, watch } from 'vue';
 import axios from 'axios';
+import InputLabel from '@/Components/InputLabel.vue';
+import TextInput from '@/Components/TextInput.vue';
+import SelectInput from '@/Components/SelectInput.vue'; // Импортируем SelectInput
 
-// --- Состояние ---
-const orders = ref([]); // Список заказов (с краткой информацией)
+const ordersData = ref({ data: [], links: [] });
 const customers = ref([]);
-const allProducts = ref([]);
-const isLoading = ref(false); // Загрузка списка
-const listError = ref(null); // Ошибка загрузки списка
+const modalProductsData = ref({ data: [], links: [] });
+const categories = ref([]); // Добавляем состояние для категорий
+const isLoadingOrders = ref(false);
+const listError = ref(null);
 
 const showDetailModal = ref(false);
-const selectedOrder = ref(null); // Полные детали загруженного заказа
-const isModalLoading = ref(false); // Загрузка ДЕТАЛЕЙ заказа
-const modalError = ref(null); // Ошибка загрузки/обновления/удаления в модалке
+const selectedOrder = ref(null);
+const isModalLoading = ref(false);
+const modalError = ref(null);
 const isUpdatingStatus = ref(false);
 const isDeletingOrder = ref(false);
 
@@ -20,15 +23,43 @@ const showAddOrderModal = ref(false);
 const newOrderData = ref({ user_id: null, products: {} });
 const addOrderError = ref(null);
 const isAddingOrder = ref(false);
+const isLoadingModalProducts = ref(false);
 
-const availableStatuses = ['pending', 'processing', 'completed', 'cancelled'];
+// Состояние для фильтров в модалке
+const modalProductFilters = ref({
+    search: '',
+    category_id: '',
+});
 
-// --- API URLs ---
+const orderStatusMap = {
+    pending: 'Ожидает',
+    processing: 'В обработке',
+    shipped: 'Отправлен',
+    completed: 'Завершен',
+    cancelled: 'Отменен',
+};
+
+const availableStatuses = Object.keys(orderStatusMap);
+const availableStatusesForSelect = computed(() => {
+    return availableStatuses.map((status) => ({
+        value: status,
+        label: orderStatusMap[status],
+    }));
+});
+
+const modalCategoryOptions = computed(() => {
+    // Добавляем опцию "Все категории"
+    return [
+        { value: '', label: 'Все категории' },
+        ...categories.value.map((cat) => ({ value: cat.id, label: cat.name })),
+    ];
+});
+
 const API_ORDERS_URL = '/internal-api/orders';
 const API_CUSTOMERS_URL = '/internal-api/customers';
 const API_PRODUCTS_URL = '/internal-api/products';
+const API_CATEGORIES_URL = '/internal-api/categories';
 
-// --- Computed ---
 const newOrderTotal = computed(() => {
     let total = 0;
     for (const productId in newOrderData.value.products) {
@@ -42,28 +73,50 @@ const newOrderTotal = computed(() => {
 const sortedCustomers = computed(() =>
     [...customers.value].sort((a, b) => a.name.localeCompare(b.name)),
 );
-const sortedProducts = computed(() =>
-    [...allProducts.value].sort((a, b) => a.name.localeCompare(b.name)),
-);
 
-// --- Helpers ---
 const getImageUrl = (path) => (path ? `/storage/${path}` : null);
-const formatCurrency = (value) => Number(value).toFixed(2) + ' ₽';
 
-// --- API Functions ---
-const fetchOrders = async () => {
-    isLoading.value = true;
+const formatCurrency = (value) => {
+    const numValue = parseFloat(value);
+    if (isNaN(numValue)) return 'N/A';
+    return numValue.toFixed(2) + ' ₽';
+};
+
+const getStatusText = (statusKey) => {
+    return orderStatusMap[statusKey] || statusKey;
+};
+
+const getStatusClass = (statusKey) => {
+    switch (statusKey) {
+        case 'pending':
+            return 'bg-yellow-100 text-yellow-800';
+        case 'processing':
+            return 'bg-blue-100 text-blue-800';
+        case 'shipped':
+            return 'bg-purple-100 text-purple-800';
+        case 'completed':
+            return 'bg-green-100 text-green-800';
+        case 'cancelled':
+            return 'bg-red-100 text-red-800';
+        default:
+            return 'bg-gray-100 text-gray-800';
+    }
+};
+
+const fetchOrders = async (url = API_ORDERS_URL) => {
+    isLoadingOrders.value = true;
     listError.value = null;
     try {
-        const response = await axios.get(API_ORDERS_URL);
-        orders.value = response.data.data ? response.data.data : response.data;
+        const response = await axios.get(url);
+        ordersData.value = response.data;
     } catch (err) {
         console.error('Ошибка загрузки списка заказов:', err);
         listError.value =
             err.response?.data?.message ||
             'Не удалось загрузить список заказов.';
+        ordersData.value = { data: [], links: [] };
     } finally {
-        isLoading.value = false;
+        isLoadingOrders.value = false;
     }
 };
 
@@ -78,41 +131,87 @@ const fetchCustomers = async () => {
     }
 };
 
-const fetchAllProducts = async () => {
+const fetchCategoriesForModal = async () => {
     try {
-        const response = await axios.get(API_PRODUCTS_URL);
-        allProducts.value = response.data.data
-            ? response.data.data
-            : response.data;
+        const response = await axios.get(API_CATEGORIES_URL);
+        categories.value = response.data;
     } catch (err) {
-        console.error('Ошибка загрузки всех товаров:', err);
-        listError.value = listError.value || 'Не удалось загрузить все товары.';
+        console.error('Ошибка загрузки категорий:', err);
+        addOrderError.value =
+            addOrderError.value ||
+            'Не удалось загрузить категории для фильтрации.';
     }
 };
 
-// --- Модифицированная функция открытия модалки деталей ---
-const openDetailModal = async (orderStub) => {
-    // orderStub содержит только данные из списка (ID, user.name и т.д.)
-    if (!orderStub || !orderStub.id) return;
+const fetchModalProducts = async (url = API_PRODUCTS_URL) => {
+    isLoadingModalProducts.value = true;
+    const params = { per_page: 5 }; // Маленькая пагинация для модалки
+    if (modalProductFilters.value.search) {
+        params.search = modalProductFilters.value.search;
+    }
+    if (modalProductFilters.value.category_id) {
+        params.category = modalProductFilters.value.category_id;
+    }
 
-    showDetailModal.value = true; // Показываем модалку сразу
-    isModalLoading.value = true; // Включаем индикатор загрузки в модалке
-    modalError.value = null;
-    selectedOrder.value = null; // Очищаем предыдущие данные
+    // Если URL передан (из пагинации), извлекаем параметры из него
+    let targetUrl = url;
+    if (url !== API_PRODUCTS_URL) {
+        try {
+            const urlObj = new URL(url);
+            urlObj.searchParams.forEach((value, key) => {
+                if (key !== 'page') {
+                    // Добавляем фильтры к параметрам запроса, если их нет в URL
+                    if (!urlObj.searchParams.has('search') && params.search)
+                        urlObj.searchParams.set('search', params.search);
+                    if (!urlObj.searchParams.has('category') && params.category)
+                        urlObj.searchParams.set('category', params.category);
+                }
+            });
+            targetUrl = urlObj.toString();
+        } catch (e) {
+            console.error('Invalid URL for pagination:', url);
+        }
+    }
 
     try {
-        // Запрашиваем ПОЛНЫЕ данные для этого заказа
+        const response = await axios.get(targetUrl, {
+            params: url === API_PRODUCTS_URL ? params : {},
+        }); // Передаем параметры только если это не URL пагинации
+        modalProductsData.value = response.data;
+    } catch (err) {
+        console.error('Ошибка загрузки товаров для модалки:', err);
+        addOrderError.value = 'Не удалось загрузить товары для выбора.';
+        modalProductsData.value = { data: [], links: [] };
+    } finally {
+        isLoadingModalProducts.value = false;
+    }
+};
+
+watch(
+    modalProductFilters,
+    () => {
+        // Применяем фильтры при их изменении (сбрасываем на 1 страницу)
+        fetchModalProducts(API_PRODUCTS_URL);
+    },
+    { deep: true },
+);
+
+const openDetailModal = async (orderStub) => {
+    if (!orderStub || !orderStub.id) return;
+    showDetailModal.value = true;
+    isModalLoading.value = true;
+    modalError.value = null;
+    selectedOrder.value = null;
+    try {
         const response = await axios.get(`${API_ORDERS_URL}/${orderStub.id}`);
-        selectedOrder.value = response.data; // Сохраняем ПОЛНЫЕ данные
+        selectedOrder.value = response.data;
     } catch (err) {
         console.error('Ошибка загрузки деталей заказа:', err);
         modalError.value =
             err.response?.data?.message ||
             'Не удалось загрузить детали заказа.';
-        // Оставляем модалку открытой с ошибкой, или можно закрыть ее:
-        // closeDetailModal();
     } finally {
-        isModalLoading.value = false; // Выключаем индикатор загрузки в модалке
+        isModalLoading.value = false;
     }
 };
 
@@ -120,27 +219,23 @@ const updateOrderStatus = async () => {
     if (!selectedOrder.value?.id || !selectedOrder.value?.status) return;
     isUpdatingStatus.value = true;
     modalError.value = null;
-    const originalStatus = orders.value.find(
+    const originalStatus = ordersData.value.data.find(
         (o) => o.id === selectedOrder.value.id,
-    )?.status; // Запоминаем старый статус из списка
-
+    )?.status;
     try {
         await axios.put(`${API_ORDERS_URL}/${selectedOrder.value.id}`, {
             status: selectedOrder.value.status,
         });
-        // Обновляем статус в ОСНОВНОМ списке заказов для отображения в таблице
-        const index = orders.value.findIndex(
+        const index = ordersData.value.data.findIndex(
             (o) => o.id === selectedOrder.value.id,
         );
         if (index !== -1) {
-            orders.value[index].status = selectedOrder.value.status;
+            ordersData.value.data[index].status = selectedOrder.value.status;
         }
-        // Статус в selectedOrder.value уже обновлен через v-model
     } catch (err) {
         console.error('Ошибка обновления статуса заказа:', err);
         modalError.value =
             err.response?.data?.message || 'Не удалось обновить статус.';
-        // Откатываем статус в selectedOrder.value к тому, что был в списке
         if (originalStatus) selectedOrder.value.status = originalStatus;
     } finally {
         isUpdatingStatus.value = false;
@@ -150,26 +245,21 @@ const updateOrderStatus = async () => {
 const deleteOrder = async () => {
     const orderToDelete = selectedOrder.value;
     if (!orderToDelete?.id) return;
-    if (
-        !confirm(
-            `Вы уверены, что хотите удалить заказ #${orderToDelete.id}? Это действие необратимо.`,
-        )
-    )
+    if (!confirm(`Вы уверены, что хотите удалить заказ #${orderToDelete.id}?`))
         return;
-
     isDeletingOrder.value = true;
     modalError.value = null;
     try {
         await axios.delete(`${API_ORDERS_URL}/${orderToDelete.id}`);
         closeDetailModal();
-        await fetchOrders(); // Обновляем основной список
+        await fetchOrders(
+            ordersData.value.links?.find((l) => l.active)?.url ||
+                API_ORDERS_URL,
+        );
     } catch (err) {
         console.error('Ошибка удаления заказа:', err);
-        // Ошибку показываем в основном поле, т.к. модалка закрыта
         listError.value =
             err.response?.data?.message || 'Не удалось удалить заказ.';
-        // Если нужно оставить модалку и показать ошибку там:
-        // modalError.value = err.response?.data?.message || 'Не удалось удалить заказ.';
     } finally {
         isDeletingOrder.value = false;
     }
@@ -187,7 +277,6 @@ const addOrder = async () => {
         addOrderError.value = 'Необходимо добавить хотя бы один товар в заказ.';
         return;
     }
-
     isAddingOrder.value = true;
     addOrderError.value = null;
     try {
@@ -215,24 +304,28 @@ const addOrder = async () => {
     }
 };
 
-// --- Modal Control ---
 const closeDetailModal = () => {
     showDetailModal.value = false;
     selectedOrder.value = null;
-    modalError.value = null; // Очищаем ошибку модалки при закрытии
+    modalError.value = null;
 };
 
-const openAddOrderModal = () => {
+const openAddOrderModal = async () => {
     newOrderData.value = { user_id: null, products: {} };
     addOrderError.value = null;
+    modalProductFilters.value = { search: '', category_id: '' }; // Сброс фильтров модалки
     showAddOrderModal.value = true;
+    if (categories.value.length === 0) {
+        await fetchCategoriesForModal(); // Загружаем категории, если их нет
+    }
+    await fetchModalProducts();
 };
 
 const closeAddOrderModal = () => {
     showAddOrderModal.value = false;
+    modalProductsData.value = { data: [], links: [] };
 };
 
-// --- Product Selection ---
 const toggleProductSelection = (product) => {
     const productId = product.id;
     if (newOrderData.value.products[productId]) {
@@ -249,17 +342,16 @@ const toggleProductSelection = (product) => {
 const updateNewOrderQuantity = (productId, event) => {
     let quantity = parseInt(event.target.value) || 1;
     if (quantity < 1) quantity = 1;
-    event.target.value = quantity; // Обновляем инпут
+    event.target.value = quantity;
     if (newOrderData.value.products[productId]) {
         newOrderData.value.products[productId].quantity = quantity;
     }
 };
 
-// --- Lifecycle ---
 onMounted(async () => {
     await fetchCustomers();
-    await fetchAllProducts();
-    await fetchOrders(); // Загружаем КРАТКИЙ список заказов
+    await fetchOrders();
+    await fetchCategoriesForModal(); // Предзагружаем категории
 });
 </script>
 
@@ -272,20 +364,17 @@ onMounted(async () => {
         <div class="mb-4">
             <button
                 @click="openAddOrderModal"
-                :disabled="customers.length === 0 || allProducts.length === 0"
+                :disabled="customers.length === 0"
                 class="rounded bg-green-500 px-4 py-2 font-bold text-white transition duration-150 ease-in-out hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
                 Добавить заказ вручную
             </button>
-            <p
-                v-if="customers.length === 0 || allProducts.length === 0"
-                class="mt-1 text-xs text-red-600"
-            >
-                * Для добавления заказа нужны покупатели и товары в базе.
+            <p v-if="customers.length === 0" class="mt-1 text-xs text-red-600">
+                * Для добавления заказа нужны покупатели в базе.
             </p>
         </div>
 
-        <div v-if="isLoading" class="py-10 text-center">
+        <div v-if="isLoadingOrders" class="py-10 text-center">
             <p class="text-gray-500">Загрузка списка заказов...</p>
         </div>
 
@@ -299,7 +388,7 @@ onMounted(async () => {
         </div>
 
         <div
-            v-if="!isLoading && !listError"
+            v-if="!isLoadingOrders && !listError"
             class="overflow-hidden rounded-lg bg-white shadow-md"
         >
             <table class="min-w-full divide-y divide-gray-200">
@@ -338,7 +427,7 @@ onMounted(async () => {
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-200 bg-white">
-                    <tr v-if="orders.length === 0">
+                    <tr v-if="ordersData.data.length === 0">
                         <td
                             colspan="5"
                             class="whitespace-nowrap px-6 py-4 text-center text-sm text-gray-500"
@@ -346,9 +435,8 @@ onMounted(async () => {
                             Заказы не найдены.
                         </td>
                     </tr>
-                    <!-- Используем order из СПИСКА для таблицы -->
                     <tr
-                        v-for="order in orders"
+                        v-for="order in ordersData.data"
                         :key="order.id"
                         @click="openDetailModal(order)"
                         class="cursor-pointer transition duration-150 ease-in-out hover:bg-gray-100"
@@ -372,29 +460,53 @@ onMounted(async () => {
                             <span
                                 :class="[
                                     'inline-flex rounded-full px-2 text-xs font-semibold leading-5',
-                                    order.status === 'completed'
-                                        ? 'bg-green-100 text-green-800'
-                                        : order.status === 'processing'
-                                          ? 'bg-yellow-100 text-yellow-800'
-                                          : order.status === 'cancelled'
-                                            ? 'bg-red-100 text-red-800'
-                                            : 'bg-gray-100 text-gray-800',
+                                    getStatusClass(order.status),
                                 ]"
                             >
-                                {{ order.status }}
+                                {{ getStatusText(order.status) }}
                             </span>
                         </td>
                         <td
                             class="whitespace-nowrap px-6 py-4 text-sm text-gray-500"
                         >
-                            {{ new Date(order.created_at).toLocaleString() }}
+                            {{
+                                new Date(order.created_at).toLocaleString(
+                                    'ru-RU',
+                                )
+                            }}
                         </td>
                     </tr>
                 </tbody>
             </table>
+            <div
+                class="border-t border-gray-200 bg-white px-4 py-3"
+                v-if="ordersData.links && ordersData.links.length > 3"
+            >
+                <div class="-mb-1 flex flex-wrap items-center justify-center">
+                    <template
+                        v-for="(link, key) in ordersData.links"
+                        :key="key"
+                    >
+                        <div
+                            v-if="link.url === null"
+                            class="mb-1 mr-1 cursor-default rounded border px-3 py-1.5 text-sm text-gray-400"
+                            v-html="link.label"
+                        />
+                        <button
+                            v-else
+                            @click="fetchOrders(link.url)"
+                            class="mb-1 mr-1 rounded border px-3 py-1.5 text-sm hover:bg-gray-100 focus:border-indigo-500 focus:text-indigo-500"
+                            :class="{
+                                'border-indigo-300 bg-white font-semibold text-indigo-600':
+                                    link.active,
+                            }"
+                            v-html="link.label"
+                        ></button>
+                    </template>
+                </div>
+            </div>
         </div>
 
-        <!-- Модальное окно деталей/редактирования заказа -->
         <div
             v-if="showDetailModal"
             class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black bg-opacity-50 p-4"
@@ -407,7 +519,6 @@ onMounted(async () => {
                 <div
                     class="mb-4 flex items-center justify-between border-b pb-3"
                 >
-                    <!-- Заголовок может показать ID до загрузки полных данных -->
                     <h3 class="text-xl font-semibold text-gray-900">
                         Детали заказа
                         {{ selectedOrder ? '#' + selectedOrder.id : '...' }}
@@ -420,13 +531,10 @@ onMounted(async () => {
                     </button>
                 </div>
 
-                <!-- Индикатор загрузки ДЛЯ МОДАЛКИ -->
                 <div v-if="isModalLoading" class="py-10 text-center">
                     <p class="text-gray-500">Загрузка деталей заказа...</p>
-                    <!-- Спиннер -->
                 </div>
 
-                <!-- Ошибка загрузки/обновления/удаления В МОДАЛКЕ -->
                 <div
                     v-if="modalError && !isModalLoading"
                     class="mb-4 rounded bg-red-100 p-2 text-sm text-red-600"
@@ -434,7 +542,6 @@ onMounted(async () => {
                     {{ modalError }}
                 </div>
 
-                <!-- Содержимое модалки показываем ТОЛЬКО ПОСЛЕ ЗАГРУЗКИ и если нет ошибки -->
                 <div v-if="!isModalLoading && !modalError && selectedOrder">
                     <div class="mb-6 grid grid-cols-1 gap-6 md:grid-cols-2">
                         <div>
@@ -463,7 +570,7 @@ onMounted(async () => {
                                 {{
                                     new Date(
                                         selectedOrder.created_at,
-                                    ).toLocaleString()
+                                    ).toLocaleString('ru-RU')
                                 }}
                             </p>
                             <p class="text-sm text-gray-600">
@@ -488,11 +595,11 @@ onMounted(async () => {
                                     class="block w-full rounded-md border-gray-300 py-2 pl-3 pr-10 text-base focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 disabled:bg-gray-100 sm:text-sm"
                                 >
                                     <option
-                                        v-for="status in availableStatuses"
-                                        :key="status"
-                                        :value="status"
+                                        v-for="statusOption in availableStatusesForSelect"
+                                        :key="statusOption.value"
+                                        :value="statusOption.value"
                                     >
-                                        {{ status }}
+                                        {{ statusOption.label }}
                                     </option>
                                 </select>
                                 <p
@@ -597,22 +704,21 @@ onMounted(async () => {
                         </button>
                     </div>
                 </div>
-                <!-- Конец блока v-if="!isModalLoading && !modalError && selectedOrder" -->
             </div>
         </div>
 
-        <!-- Модальное окно добавления заказа (остается без изменений) -->
         <div
             v-if="showAddOrderModal"
             class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black bg-opacity-50 p-4"
             @click.self="closeAddOrderModal"
         >
             <div
-                class="mx-auto my-8 w-full max-w-3xl rounded-lg bg-white p-6 shadow-xl"
+                class="mx-auto my-8 flex w-full max-w-3xl flex-col rounded-lg bg-white p-6 shadow-xl"
+                style="max-height: 90vh"
                 @click.stop
             >
                 <div
-                    class="mb-4 flex items-center justify-between border-b pb-3"
+                    class="mb-4 flex flex-shrink-0 items-center justify-between border-b pb-3"
                 >
                     <h3 class="text-xl font-semibold text-gray-900">
                         Создать новый заказ
@@ -626,112 +732,188 @@ onMounted(async () => {
                 </div>
                 <div
                     v-if="addOrderError"
-                    class="mb-4 rounded bg-red-100 p-2 text-sm text-red-600"
+                    class="mb-4 flex-shrink-0 rounded bg-red-100 p-2 text-sm text-red-600"
                 >
                     {{ addOrderError }}
                 </div>
-                <form @submit.prevent="addOrder" class="space-y-6">
-                    <div>
-                        <label
+                <form
+                    @submit.prevent="addOrder"
+                    class="flex flex-grow flex-col space-y-6 overflow-hidden"
+                >
+                    <div class="flex-shrink-0">
+                        <InputLabel
                             for="customer-select"
-                            class="mb-1 block text-sm font-medium text-gray-700"
-                            >Выберите покупателя:</label
-                        >
-                        <select
+                            value="Выберите покупателя:"
+                        />
+                        <SelectInput
                             id="customer-select"
+                            class="mt-1 block w-full"
                             v-model="newOrderData.user_id"
+                            :options="
+                                sortedCustomers.map((c) => ({
+                                    value: c.id,
+                                    label: `${c.name} (${c.email})`,
+                                }))
+                            "
+                            placeholder="-- Выберите покупателя --"
                             required
-                            class="block w-full rounded-md border-gray-300 py-2 pl-3 pr-10 text-base focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm"
-                        >
-                            <option :value="null" disabled>
-                                -- Выберите покупателя --
-                            </option>
-                            <option
-                                v-for="customer in sortedCustomers"
-                                :key="customer.id"
-                                :value="customer.id"
-                            >
-                                {{ customer.name }} ({{ customer.email }})
-                            </option>
-                        </select>
+                        />
                     </div>
-                    <div>
+                    <div class="flex flex-grow flex-col overflow-hidden">
                         <h4
-                            class="text-md mb-2 border-t pt-4 font-semibold text-gray-700"
+                            class="text-md mb-2 flex-shrink-0 border-t pt-4 font-semibold text-gray-700"
                         >
                             Выберите товары:
                         </h4>
                         <div
-                            class="max-h-80 space-y-3 overflow-y-auto rounded border p-2"
+                            class="mb-2 grid flex-shrink-0 grid-cols-1 gap-4 sm:grid-cols-2"
                         >
-                            <div
-                                v-if="allProducts.length === 0"
-                                class="p-4 text-center text-sm text-gray-500"
-                            >
-                                Нет доступных товаров для добавления.
+                            <div>
+                                <InputLabel
+                                    for="product-search"
+                                    value="Поиск по ID/Названию"
+                                />
+                                <TextInput
+                                    id="product-search"
+                                    type="text"
+                                    class="mt-1 block w-full"
+                                    v-model="modalProductFilters.search"
+                                    placeholder="ID или название..."
+                                />
                             </div>
-                            <div
-                                v-for="product in sortedProducts"
-                                :key="product.id"
-                                class="flex items-center space-x-3 border-b pb-2 last:border-b-0 last:pb-0"
-                            >
-                                <input
-                                    type="checkbox"
-                                    :id="'product-select-' + product.id"
-                                    :checked="
-                                        !!newOrderData.products[product.id]
-                                    "
-                                    @change="toggleProductSelection(product)"
-                                    class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                            <div>
+                                <InputLabel
+                                    for="product-category"
+                                    value="Категория"
                                 />
-                                <img
-                                    v-if="getImageUrl(product.image_url)"
-                                    :src="getImageUrl(product.image_url)"
-                                    alt=""
-                                    class="h-10 w-10 flex-shrink-0 rounded object-cover"
-                                />
-                                <div
-                                    v-else
-                                    class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded bg-gray-200 text-xs text-gray-500"
-                                >
-                                    Фото
-                                </div>
-                                <label
-                                    :for="'product-select-' + product.id"
-                                    class="flex-grow cursor-pointer text-sm font-medium text-gray-700"
-                                >
-                                    {{ product.name }}
-                                    <span class="text-gray-500"
-                                        >({{
-                                            formatCurrency(product.price)
-                                        }})</span
-                                    >
-                                </label>
-                                <input
-                                    type="number"
-                                    min="1"
-                                    step="1"
-                                    v-if="newOrderData.products[product.id]"
-                                    :value="
-                                        newOrderData.products[product.id]
-                                            .quantity
-                                    "
-                                    @input="
-                                        updateNewOrderQuantity(
-                                            product.id,
-                                            $event,
-                                        )
-                                    "
-                                    class="w-20 rounded-md border border-gray-300 px-2 py-1 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm"
-                                    placeholder="Кол-во"
+                                <SelectInput
+                                    id="product-category"
+                                    class="mt-1 block w-full"
+                                    v-model="modalProductFilters.category_id"
+                                    :options="modalCategoryOptions"
                                 />
                             </div>
                         </div>
+                        <div
+                            class="flex-grow space-y-3 overflow-y-auto rounded border p-2"
+                        >
+                            <div
+                                v-if="isLoadingModalProducts"
+                                class="p-4 text-center text-sm text-gray-500"
+                            >
+                                Загрузка товаров...
+                            </div>
+                            <div
+                                v-else-if="
+                                    modalProductsData.data.length === 0 &&
+                                    !isLoadingModalProducts
+                                "
+                                class="p-4 text-center text-sm text-gray-500"
+                            >
+                                Товары не найдены.
+                            </div>
+                            <div v-else>
+                                <div
+                                    v-for="product in modalProductsData.data"
+                                    :key="product.id"
+                                    class="flex items-center space-x-3 border-b pb-2 last:border-b-0 last:pb-0"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        :id="'product-select-' + product.id"
+                                        :checked="
+                                            !!newOrderData.products[product.id]
+                                        "
+                                        @change="
+                                            toggleProductSelection(product)
+                                        "
+                                        class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                    />
+                                    <img
+                                        v-if="getImageUrl(product.image_url)"
+                                        :src="getImageUrl(product.image_url)"
+                                        alt=""
+                                        class="h-10 w-10 flex-shrink-0 rounded object-cover"
+                                    />
+                                    <div
+                                        v-else
+                                        class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded bg-gray-200 text-xs text-gray-500"
+                                    >
+                                        Фото
+                                    </div>
+                                    <label
+                                        :for="'product-select-' + product.id"
+                                        class="flex-grow cursor-pointer text-sm font-medium text-gray-700"
+                                    >
+                                        {{ product.name }} (ID:
+                                        {{ product.id }})
+                                        <span class="text-gray-500"
+                                            >({{
+                                                formatCurrency(product.price)
+                                            }})</span
+                                        >
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        step="1"
+                                        v-if="newOrderData.products[product.id]"
+                                        :value="
+                                            newOrderData.products[product.id]
+                                                .quantity
+                                        "
+                                        @input="
+                                            updateNewOrderQuantity(
+                                                product.id,
+                                                $event,
+                                            )
+                                        "
+                                        class="w-20 rounded-md border border-gray-300 px-2 py-1 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm"
+                                        placeholder="Кол-во"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                        <div
+                            class="mt-2 flex-shrink-0 border-t pt-2"
+                            v-if="
+                                modalProductsData.links &&
+                                modalProductsData.links.length > 3
+                            "
+                        >
+                            <div class="-mb-1 flex flex-wrap justify-center">
+                                <template
+                                    v-for="(
+                                        link, key
+                                    ) in modalProductsData.links"
+                                    :key="key"
+                                >
+                                    <div
+                                        v-if="link.url === null"
+                                        class="mb-1 mr-1 cursor-default rounded border px-3 py-1.5 text-sm text-gray-400"
+                                        v-html="link.label"
+                                    />
+                                    <button
+                                        v-else
+                                        @click="fetchModalProducts(link.url)"
+                                        type="button"
+                                        class="mb-1 mr-1 rounded border px-3 py-1.5 text-sm hover:bg-gray-100 focus:border-indigo-500 focus:text-indigo-500"
+                                        :class="{
+                                            'border-indigo-300 bg-white font-semibold text-indigo-600':
+                                                link.active,
+                                        }"
+                                        v-html="link.label"
+                                    ></button>
+                                </template>
+                            </div>
+                        </div>
                     </div>
-                    <div class="border-t pt-4 text-right text-lg font-semibold">
+                    <div
+                        class="flex-shrink-0 border-t pt-4 text-right text-lg font-semibold"
+                    >
                         Итого: {{ formatCurrency(newOrderTotal) }}
                     </div>
-                    <div class="mt-6 flex justify-end space-x-3">
+                    <div class="mt-6 flex flex-shrink-0 justify-end space-x-3">
                         <button
                             @click="closeAddOrderModal"
                             type="button"
@@ -760,6 +942,4 @@ onMounted(async () => {
     </div>
 </template>
 
-<style scoped>
-/* Стили можно добавить здесь */
-</style>
+<style scoped></style>

@@ -30,7 +30,11 @@ class OrderController extends Controller
     public function store(StoreOrderRequest $request): JsonResponse
     {
         $validated = $request->validated();
-        $user = $request->user();
+        $authenticatedUser = $request->user();
+
+        $orderUserId = $authenticatedUser->is_admin
+            ? $validated['user_id']
+            : $authenticatedUser->id;
 
         try {
             DB::beginTransaction();
@@ -60,7 +64,7 @@ class OrderController extends Controller
             }
 
             $order = Order::create([
-                'user_id' => $user->id,
+                'user_id' => $orderUserId, // Используем определенный ID
                 'total_amount' => $totalAmount,
                 'status' => 'pending',
             ]);
